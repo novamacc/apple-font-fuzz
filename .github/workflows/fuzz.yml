@@ -1,0 +1,93 @@
+name: Continuous Fuzz
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: macos-15
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzzer: [coretext_fuzzer, morx_exploit, morx_cmap_chain, cmap_variant_fuzzer]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build fuzzer
+        run: |
+          cd ${{ matrix.fuzzer }}
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Run fuzzer (5 hours)
+        run: |
+          cd ${{ matrix.fuzzer }}
+          # Find the fuzzer or test binary
+          FUZZER=$(find . \( -name "fuzz_*" -o -name "cmap_variant_fuzzer" -o -name "test_morx_asan" \) -type f -perm +111 | head -1)
+          CORPUS=$(find . -name "corpus*" -type d | head -1)
+          if [ -z "$CORPUS" ]; then CORPUS=corpus; fi
+          mkdir -p crashes
+
+          if [ -z "$FUZZER" ]; then
+            echo "No fuzzer binary found, skipping run"
+            exit 0
+          fi
+
+          echo "Running: $FUZZER $CORPUS/"
+          # Check if it's a libfuzzer binary (has LLVMFuzzerTestOneInput)
+          if nm "$FUZZER" 2>/dev/null | grep -q LLVMFuzzerTestOneInput; then
+            timeout 18000 $FUZZER $CORPUS/ \
+              -max_len=65536 \
+              -timeout=10 \
+              -rss_limit_mb=2048 \
+              -jobs=3 \
+              -workers=3 \
+              -artifact_prefix=crashes/ \
+              -print_final_stats=1 \
+              || true
+          else
+            # Not a libfuzzer binary - run it with corpus files as args
+            for f in $CORPUS/*; do
+              echo "Testing: $f"
+              timeout 30 $FUZZER "$f" 2>&1 || true
+            done
+          fi
+
+      - name: Check for crashes
+        if: always()
+        run: |
+          cd ${{ matrix.fuzzer }}
+          if ls crashes/crash-* 1>/dev/null 2>&1; then
+            echo "CRASHES FOUND!"
+            ls -la crashes/
+            for f in crashes/crash-*; do xxd "$f" | head -20; done
+          elif ls crashes/oom-* 1>/dev/null 2>&1; then
+            echo "OOM found:"
+            ls -la crashes/oom-*
+          else
+            echo "No crashes found this run"
+          fi
+
+      - name: Upload crash artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crashes-${{ matrix.fuzzer }}-${{ github.run_number }}
+          path: |
+            ${{ matrix.fuzzer }}/crashes/
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Upload grown corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-${{ matrix.fuzzer }}-${{ github.run_number }}
+          path: |
+            ${{ matrix.fuzzer }}/corpus*/
+          retention-days: 30
+          if-no-files-found: ignore
