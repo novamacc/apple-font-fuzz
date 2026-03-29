@@ -20,7 +20,7 @@ done
 echo "      Done. $(ls corpus/ | wc -l | tr -d ' ') seeds"
 
 echo "[2/2] Building fuzzer..."
-if clang -fsanitize=fuzzer -x c -c /dev/null -o /dev/null 2>/dev/null; then
+if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang -fsanitize=fuzzer -x c - -o /dev/null 2>/dev/null; then
     echo "      libFuzzer available - building with -fsanitize=fuzzer"
     clang $COMMON \
         -fsanitize=fuzzer,address,undefined \

@@ -26,7 +26,7 @@ jobs:
           clang --version
           echo ""
           echo "=== libFuzzer Check ==="
-          if clang -fsanitize=fuzzer -x c -c /dev/null -o /dev/null 2>/dev/null; then
+          if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang -fsanitize=fuzzer -x c - -o /dev/null 2>/dev/null; then
             echo "libFuzzer runtime: AVAILABLE"
           else
             echo "libFuzzer runtime: NOT AVAILABLE (will use standalone harness)"
