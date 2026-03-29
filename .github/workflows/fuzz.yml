@@ -39,6 +39,9 @@ jobs:
             echo "AddressSanitizer: NOT AVAILABLE"
           fi
 
+      - name: Install dependencies
+        run: brew install coreutils 2>/dev/null || true
+
       - name: Build fuzzer
         run: |
           cd ${{ matrix.fuzzer }}
@@ -67,7 +70,7 @@ jobs:
           if [[ "$BASENAME" == fuzz_* ]] || [[ "$BASENAME" == cmap_variant_fuzzer ]]; then
             # libFuzzer or standalone harness - pass corpus dir + flags
             echo "Running as fuzzer: $FUZZER $CORPUS/"
-            timeout 18000 $FUZZER $CORPUS/ \
+            gtimeout 18000 $FUZZER $CORPUS/ \
               -max_len=65536 \
               -timeout=10 \
               -rss_limit_mb=2048 \
@@ -79,7 +82,7 @@ jobs:
           elif [[ "$BASENAME" == cmap_variant_fuzzer ]]; then
             # cmap_variant_fuzzer has its own main that takes output dir
             echo "Running cmap_variant_fuzzer..."
-            timeout 18000 $FUZZER $CORPUS/ 2>&1 || true
+            gtimeout 18000 $FUZZER $CORPUS/ 2>&1 || true
           else
             # Non-libfuzzer binary (test_morx_asan, test_chain) - pass files as args
             echo "Running test harness: $FUZZER with corpus files"
