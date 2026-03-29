@@ -1,5 +1,6 @@
 #!/bin/bash
 # build.sh - Build morx+cmap chain font generator and test harness
+# morx_cmap_chain uses its own main() - no libFuzzer needed, just ASAN
 set -e
 cd "$(dirname "$0")"
 

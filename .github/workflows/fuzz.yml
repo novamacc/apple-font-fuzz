@@ -17,6 +17,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check environment
+        run: |
+          echo "=== Xcode Version ==="
+          xcodebuild -version
+          echo ""
+          echo "=== Clang Version ==="
+          clang --version
+          echo ""
+          echo "=== libFuzzer Check ==="
+          if clang -fsanitize=fuzzer -x c -c /dev/null -o /dev/null 2>/dev/null; then
+            echo "libFuzzer runtime: AVAILABLE"
+          else
+            echo "libFuzzer runtime: NOT AVAILABLE (will use standalone harness)"
+          fi
+          echo ""
+          echo "=== ASAN Check ==="
+          if clang -fsanitize=address -x c -c /dev/null -o /dev/null 2>/dev/null; then
+            echo "AddressSanitizer: AVAILABLE"
+          else
+            echo "AddressSanitizer: NOT AVAILABLE"
+          fi
+
       - name: Build fuzzer
         run: |
           cd ${{ matrix.fuzzer }}
@@ -27,7 +49,7 @@ jobs:
         run: |
           cd ${{ matrix.fuzzer }}
           # Find the fuzzer or test binary
-          FUZZER=$(find . \( -name "fuzz_*" -o -name "cmap_variant_fuzzer" -o -name "test_morx_asan" \) -type f -perm +111 | head -1)
+          FUZZER=$(find . \( -name "fuzz_*" -o -name "cmap_variant_fuzzer" -o -name "test_morx_asan" -o -name "test_chain" \) -type f -perm +111 | head -1)
           CORPUS=$(find . -name "corpus*" -type d | head -1)
           if [ -z "$CORPUS" ]; then CORPUS=corpus; fi
           mkdir -p crashes
@@ -37,9 +59,14 @@ jobs:
             exit 0
           fi
 
-          echo "Running: $FUZZER $CORPUS/"
-          # Check if it's a libfuzzer binary (has LLVMFuzzerTestOneInput)
-          if nm "$FUZZER" 2>/dev/null | grep -q LLVMFuzzerTestOneInput; then
+          echo "Found binary: $FUZZER"
+
+          # Check if it's a libfuzzer binary or standalone harness (accepts corpus dir)
+          # vs a non-fuzzer binary (accepts individual files)
+          BASENAME=$(basename "$FUZZER")
+          if [[ "$BASENAME" == fuzz_* ]] || [[ "$BASENAME" == cmap_variant_fuzzer ]]; then
+            # libFuzzer or standalone harness - pass corpus dir + flags
+            echo "Running as fuzzer: $FUZZER $CORPUS/"
             timeout 18000 $FUZZER $CORPUS/ \
               -max_len=65536 \
               -timeout=10 \
@@ -49,8 +76,13 @@ jobs:
               -artifact_prefix=crashes/ \
               -print_final_stats=1 \
               || true
+          elif [[ "$BASENAME" == cmap_variant_fuzzer ]]; then
+            # cmap_variant_fuzzer has its own main that takes output dir
+            echo "Running cmap_variant_fuzzer..."
+            timeout 18000 $FUZZER $CORPUS/ 2>&1 || true
           else
-            # Not a libfuzzer binary - run it with corpus files as args
+            # Non-libfuzzer binary (test_morx_asan, test_chain) - pass files as args
+            echo "Running test harness: $FUZZER with corpus files"
             for f in $CORPUS/*; do
               echo "Testing: $f"
               timeout 30 $FUZZER "$f" 2>&1 || true
